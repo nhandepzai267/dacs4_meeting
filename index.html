@@ -1,0 +1,361 @@
+<!-- index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Vờ Ku Mít - Ready to join?</title>
+  <link rel="stylesheet" href="style/index.css">
+</head>
+<body>
+  <header>
+    <div class="logo">
+      <img src="scr/logo.png" alt="Logo" />
+      <span><span style="color: #ff0000;">Vờ</span> <span style="color: #ffd700;">Ku</span> <span style="color: #0099ff;">Mít</span></span>
+    </div>
+    <div class="user-info">
+      <div class="welcome-text">
+        <span class="welcome-label">Welcome,</span>
+        <span class="email" id="userEmail">Loading...</span>
+      </div>
+      <a href="#" id="logoutBtn" class="logout-btn">Đăng xuất</a>
+    </div>
+  </header>
+  <main>
+    <div class="left">
+      <div class="video-preview">
+        <video id="localVideo" autoplay muted playsinline></video>
+        <div class="user-label" id="userName">Bạn</div>
+        <div class="camera-off" id="cameraOffMsg">
+          <span>Camera is off</span>
+        </div>
+        <div class="controls">
+          <button class="ctrl-btn mic" id="micBtn" title="Microphone"></button>
+          <button class="ctrl-btn cam" id="camBtn" title="Camera"></button>
+        </div>
+      </div>
+      <div class="device-select">
+        <select id="micSelect"><option>Microphone...</option></select>
+        <select id="speakerSelect"><option>Speakers...</option></select>
+        <select id="cameraSelect"><option>Camera...</option></select>
+      </div>
+    </div>
+    <div class="right">
+      <div class="room-section">
+        <h2>Tạo hoặc tham gia phòng</h2>
+        
+        <div class="create-room">
+          <h3>Tạo phòng mới</h3>
+          <button class="create-btn" id="createRoomBtn">
+            <span class="icon">➕</span>
+            Tạo phòng ngay
+          </button>
+        </div>
+
+        <div class="divider">
+          <span>hoặc</span>
+        </div>
+
+        <div class="join-room">
+          <h3>Tham gia phòng</h3>
+          <input 
+            type="text" 
+            id="roomCodeInput" 
+            placeholder="Nhập mã phòng (vd: 1234-5678-9012)"
+            maxlength="14"
+          />
+          <button class="join-btn" id="joinRoomBtn">
+            Tham gia
+          </button>
+        </div>
+      </div>
+    </div>
+  </main>
+  <script>
+    const API_URL = 'http://localhost:5000';
+
+    // Kiểm tra authentication khi load trang
+    window.onload = function() {
+      const token = localStorage.getItem('token');
+      const userEmail = localStorage.getItem('userEmail');
+      
+      if (!token || !userEmail) {
+        // Chưa đăng nhập, redirect về login
+        window.location.href = 'scr/auth/login.html';
+        return;
+      }
+      
+      // Hiển thị email user
+      document.getElementById('userEmail').textContent = userEmail;
+      
+      // Verify token với server (optional)
+      verifyToken(token);
+    };
+
+    // Verify token
+    async function verifyToken(token) {
+      try {
+        const response = await fetch(`${API_URL}/api/profile`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        
+        if (!response.ok) {
+          // Token không hợp lệ, logout
+          logout();
+        }
+      } catch (error) {
+        console.error('Lỗi verify token:', error);
+      }
+    }
+
+    // Logout function
+    function logout() {
+      localStorage.removeItem('token');
+      localStorage.removeItem('userEmail');
+      window.location.href = 'scr/auth/login.html';
+    }
+
+    // Logout button
+    document.getElementById('logoutBtn').onclick = function(e) {
+      e.preventDefault();
+      if (confirm('Bạn có chắc muốn đăng xuất?')) {
+        logout();
+      }
+    };
+
+    // WebRTC - Camera & Microphone
+    let localStream = null;
+    let isCameraOn = false;
+    let isMicOn = false;
+
+    const localVideo = document.getElementById('localVideo');
+    const cameraOffMsg = document.getElementById('cameraOffMsg');
+    const micBtn = document.getElementById('micBtn');
+    const camBtn = document.getElementById('camBtn');
+    const micSelect = document.getElementById('micSelect');
+    const cameraSelect = document.getElementById('cameraSelect');
+
+    // Truncate device name
+    function truncateDeviceName(name, maxLength = 30) {
+      if (name.length <= maxLength) return name;
+      return name.substring(0, maxLength) + '...';
+    }
+
+    // Lấy danh sách devices
+    async function getDevices() {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        
+        // Microphones
+        const mics = devices.filter(d => d.kind === 'audioinput');
+        micSelect.innerHTML = mics.map(d => {
+          const label = d.label || 'Microphone';
+          return `<option value="${d.deviceId}" title="${label}">${truncateDeviceName(label)}</option>`;
+        }).join('');
+        
+        // Speakers
+        const speakers = devices.filter(d => d.kind === 'audiooutput');
+        const speakerSelect = document.getElementById('speakerSelect');
+        if (speakers.length > 0) {
+          speakerSelect.innerHTML = speakers.map(d => {
+            const label = d.label || 'Speaker';
+            return `<option value="${d.deviceId}" title="${label}">${truncateDeviceName(label)}</option>`;
+          }).join('');
+        }
+        
+        // Cameras
+        const cameras = devices.filter(d => d.kind === 'videoinput');
+        cameraSelect.innerHTML = cameras.map(d => {
+          const label = d.label || 'Camera';
+          return `<option value="${d.deviceId}" title="${label}">${truncateDeviceName(label)}</option>`;
+        }).join('');
+      } catch (error) {
+        console.error('Lỗi lấy devices:', error);
+      }
+    }
+
+    // Bật camera
+    async function startCamera() {
+      try {
+        const constraints = {
+          video: {
+            deviceId: cameraSelect.value ? { exact: cameraSelect.value } : undefined,
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: false
+        };
+        
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        
+        if (localStream) {
+          // Thêm video track vào stream hiện tại
+          const videoTrack = stream.getVideoTracks()[0];
+          localStream.addTrack(videoTrack);
+        } else {
+          localStream = stream;
+        }
+        
+        localVideo.srcObject = localStream;
+        localVideo.style.display = 'block';
+        cameraOffMsg.style.display = 'none';
+        isCameraOn = true;
+        camBtn.classList.add('active');
+        camBtn.title = 'Turn off camera';
+        
+        await getDevices();
+      } catch (error) {
+        console.error('Lỗi bật camera:', error);
+        alert('Không thể truy cập camera. Vui lòng cho phép quyền truy cập.');
+      }
+    }
+
+    // Tắt camera
+    function stopCamera() {
+      if (localStream) {
+        localStream.getVideoTracks().forEach(track => track.stop());
+      }
+      localVideo.style.display = 'none';
+      cameraOffMsg.style.display = 'flex';
+      isCameraOn = false;
+      camBtn.classList.remove('active');
+      camBtn.title = 'Turn on camera';
+    }
+
+    // Bật/tắt mic
+    async function toggleMic() {
+      if (!isMicOn) {
+        try {
+          const constraints = {
+            audio: {
+              deviceId: micSelect.value ? { exact: micSelect.value } : undefined
+            },
+            video: false
+          };
+          
+          const stream = await navigator.mediaDevices.getUserMedia(constraints);
+          
+          if (localStream) {
+            const audioTrack = stream.getAudioTracks()[0];
+            localStream.addTrack(audioTrack);
+          } else {
+            localStream = stream;
+          }
+          
+          isMicOn = true;
+          micBtn.classList.add('active');
+          micBtn.title = 'Turn off microphone';
+          
+          await getDevices();
+        } catch (error) {
+          console.error('Lỗi bật mic:', error);
+          alert('Không thể truy cập microphone.');
+        }
+      } else {
+        if (localStream) {
+          localStream.getAudioTracks().forEach(track => track.stop());
+        }
+        isMicOn = false;
+        micBtn.classList.remove('active');
+        micBtn.title = 'Turn on microphone';
+      }
+    }
+
+    // Event listeners
+    camBtn.onclick = () => {
+      if (isCameraOn) {
+        stopCamera();
+      } else {
+        startCamera();
+      }
+    };
+
+    micBtn.onclick = toggleMic;
+
+    // Thay đổi camera
+    cameraSelect.onchange = () => {
+      if (isCameraOn) {
+        stopCamera();
+        startCamera();
+      }
+    };
+
+    // Thay đổi mic
+    micSelect.onchange = () => {
+      if (isMicOn) {
+        if (localStream) {
+          localStream.getAudioTracks().forEach(track => track.stop());
+        }
+        isMicOn = false;
+        toggleMic();
+      }
+    };
+
+    // Load devices khi trang load
+    getDevices();
+
+    // Room code 
+    function generateRoomCode() {
+      let code = '';
+      for (let i = 0; i < 14; i++) {
+        if (i === 4 || i === 9) {
+          code += '-';
+        } else {
+          code += Math.floor(Math.random() * 10);
+        }
+      }
+      return code;
+    }
+
+    // Tạo phòng mới
+    document.getElementById('createRoomBtn').onclick = function() {
+      const roomCode = generateRoomCode();
+      
+      // Lưu room code
+      localStorage.setItem('currentRoom', roomCode);
+      
+      // Redirect đến trang room
+      window.location.href = `scr/room/room.html?code=${roomCode}`;
+    };
+
+    // Tham gia phòng
+    document.getElementById('joinRoomBtn').onclick = function() {
+      let roomCode = document.getElementById('roomCodeInput').value.trim();
+      
+      if (!roomCode) {
+        alert('Vui lòng nhập mã phòng!');
+        return;
+      }
+      
+      // Loại bỏ tất cả khoảng trắng
+      roomCode = roomCode.replace(/\s+/g, '');
+      
+      // Nếu chưa có dấu gạch ngang, thêm vào
+      if (!roomCode.includes('-') && roomCode.length === 12) {
+        roomCode = roomCode.substring(0, 4) + '-' + roomCode.substring(4, 8) + '-' + roomCode.substring(8, 12);
+      }
+      
+      // Validate format (xxxx-xxxx-xxxx)
+      const roomCodePattern = /^\d{4}-\d{4}-\d{4}$/;
+      if (!roomCodePattern.test(roomCode)) {
+        alert('Mã phòng không hợp lệ! Vui lòng nhập 12 chữ số (vd: 1234-5678-9012)');
+        return;
+      }
+      
+      // Lưu room code
+      localStorage.setItem('currentRoom', roomCode);
+      
+      // Redirect đến trang room
+      window.location.href = `scr/room/room.html?code=${roomCode}`;
+    };
+
+    // Enter key để join
+    document.getElementById('roomCodeInput').onkeypress = function(e) {
+      if (e.key === 'Enter') {
+        document.getElementById('joinRoomBtn').click();
+      }
+    };
+  </script>
+</body>
+</html>

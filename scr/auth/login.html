@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Sign in to Vờ Ku Mít</title>
+  <link rel="stylesheet" href="login.css">
+</head>
+<body>
+  <div class="login-container">
+    <div class="login-box">
+      <h2>Sign in</h2>
+      <form id="loginForm">
+        <div class="form-group">
+          <label for="email">Email</label>
+          <input type="email" id="email" required placeholder="Enter your email">
+        </div>
+        <div class="form-group">
+          <label for="password">Password</label>
+          <input type="password" id="password" required placeholder="Enter your password">
+        </div>
+        <button type="submit" class="login-btn">Login</button>
+        <div class="form-bottom">
+          <a href="#">Forgot password?</a>
+          <span>·</span>
+          <a href="register.html">Create account</a>
+        </div>
+      </form>
+    </div>
+  </div>
+  <script>
+    const API_URL = 'http://localhost:5000';
+
+    document.getElementById('loginForm').onsubmit = async function(e) {
+      e.preventDefault();
+      
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+      const loginBtn = document.querySelector('.login-btn');
+      
+      // Disable button during request
+      loginBtn.disabled = true;
+      loginBtn.textContent = 'Đang đăng nhập...';
+      
+      try {
+        const response = await fetch(`${API_URL}/api/login`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ email, password })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok && data.success) {
+          // Lưu token và email vào localStorage
+          localStorage.setItem('token', data.token);
+          localStorage.setItem('userEmail', email);
+          
+          alert('Đăng nhập thành công!');
+          // Redirect về trang chínhnp
+          window.location.href = '../../index.html';
+        } else {
+          alert(data.error || 'Đăng nhập thất bại!');
+          loginBtn.disabled = false;
+          loginBtn.textContent = 'Login';
+        }
+      } catch (error) {
+        console.error('Lỗi:', error);
+        alert('Không thể kết nối đến server. Vui lòng kiểm tra server đã chạy chưa.');
+        loginBtn.disabled = false;
+        loginBtn.textContent = 'Login';
+      }
+    }
+  </script>
+</body>
+</html>

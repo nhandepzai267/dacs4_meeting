@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Test Socket.IO Connection</title>
+  <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+</head>
+<body>
+  <h1>Test Socket.IO Connection</h1>
+  <div id="status">Đang kết nối...</div>
+  <div id="logs"></div>
+
+  <script>
+    const logsDiv = document.getElementById('logs');
+    const statusDiv = document.getElementById('status');
+
+    function log(message) {
+      console.log(message);
+      const p = document.createElement('p');
+      p.textContent = new Date().toLocaleTimeString() + ': ' + message;
+      logsDiv.appendChild(p);
+    }
+
+    log('Bắt đầu kết nối Socket.IO...');
+
+    const socket = io('http://localhost:5000');
+
+    socket.on('connect', () => {
+      log('Socket.IO connected! Socket ID: ' + socket.id);
+      statusDiv.textContent = 'Đã kết nối!';
+      statusDiv.style.color = 'green';
+
+      // Test join room
+      socket.emit('join-room', { 
+        roomCode: 'test-1234-5678', 
+        userEmail: 'test@example.com' 
+      });
+      log('Đã gửi join-room');
+    });
+
+    socket.on('connect_error', (error) => {
+      log('Connection error: ' + error.message);
+      statusDiv.textContent = 'Lỗi kết nối!';
+      statusDiv.style.color = 'red';
+    });
+
+    socket.on('disconnect', () => {
+      log('Socket.IO disconnected');
+      statusDiv.textContent = 'Đã ngắt kết nối';
+      statusDiv.style.color = 'orange';
+    });
+
+    socket.on('room-users', (users) => {
+      log('Room users: ' + JSON.stringify(users));
+    });
+
+    socket.on('user-joined', (data) => {
+      log('User joined: ' + data.email);
+    });
+
+    socket.on('user-left', (data) => {
+      log('User left: ' + data.email);
+    });
+  </script>
+</body>
+</html>
