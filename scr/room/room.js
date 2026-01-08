@@ -561,7 +561,7 @@ function initSocketIO() {
       }
     });
   });
-
+  // Three-way handsake
   // Handle new user joined
   socket.on('user-joined', async ({ socketId, email }) => {
     console.log('User joined:', email);
@@ -606,6 +606,38 @@ function initSocketIO() {
     if (pc && candidate) {
       await pc.addIceCandidate(new RTCIceCandidate(candidate));
     }
+  });
+
+  // Handle moderation warning from server
+  socket.on('moderation-warning', ({ message, timestamp }) => {
+    console.log('🚫 Moderation warning received:', message);
+    showModerationWarning(message);
+    
+    // Add to chat as system message
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'chat-message system-message';
+    
+    const time = new Date(timestamp).toLocaleTimeString('vi-VN', { 
+      hour: '2-digit', 
+      minute: '2-digit' 
+    });
+    
+    messageDiv.innerHTML = `
+      <div class="message-sender">🛡️ Hệ thống</div>
+      <div class="message-content system-warning">${message}</div>
+      <div class="message-time">${time}</div>
+    `;
+    
+    messageDiv.style.cssText = `
+      border-left: 4px solid #ff4444;
+      background: rgba(255, 68, 68, 0.1);
+      margin: 8px 0;
+      padding: 8px 12px;
+      border-radius: 4px;
+    `;
+    
+    chatMessages.appendChild(messageDiv);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
   });
 
   // Handle chat message from server
@@ -1081,24 +1113,121 @@ window.downloadFile = function(fileData, fileName) {
   console.log('📥 Downloaded:', fileName);
 };
 
-// Update send message to use Socket.IO
+// Toxic detect
+const toxicWords = [
+  // TIeng viet
+  'ngu', 'đồ ngu', 'ngu ngốc', 'khốn nạn', 'khốn', 'đần', 'ngốc',
+  'chết tiệt', 'đồ khốn', 'thằng ngu', 'con ngu', 'đồ ngốc',
+  'ngu si', 'đần độn', 'khốn kiếp', 'đồ đần',
+  
+  // Tieng anh
+  'stupid', 'idiot', 'fool', 'dumb', 'moron', 'hate', 'damn',
+  
+  // Leetspeak variations
+  'n9u', 'ng0c', 'kh0n', 'd4n'
+];
+
+const toxicPatterns = [
+  /\bn[u3]g[u0]\b/gi,           // ngu, n3g0, nugu, n3gu
+  /\bkh[o0]n\b/gi,              // khon, kh0n
+  /\bd[a4]n\b/gi,               // dan, d4n
+  /\bng[o0]c\b/gi,              // ngoc, ng0c
+  /\bst[u3]p[i1]d\b/gi,         // stupid, st3p1d
+  /\b[i1]d[i1][o0]t\b/gi        // idiot, 1d10t
+];
+
+function isToxicMessage(message) {
+  const lowerMessage = message.toLowerCase();
+  
+  // Kiem tra xem co tu nam trong cau hay khong
+  const hasExactMatch = toxicWords.some(word => lowerMessage.includes(word));
+  if (hasExactMatch) return true;
+  
+  // Kiem tra cac pattern 
+  const hasPatternMatch = toxicPatterns.some(pattern => pattern.test(message));
+  return hasPatternMatch;
+}
+
+function showModerationWarning(text) {
+  const warning = document.createElement('div');
+  warning.className = 'moderation-warning';
+  warning.innerHTML = `
+    <div class="warning-icon">⚠️</div>
+    <div class="warning-text">${text}</div>
+  `;
+  warning.style.cssText = `
+    background: linear-gradient(135deg, #ff4444, #cc3333);
+    color: white;
+    padding: 12px 16px;
+    border-radius: 8px;
+    margin: 8px 0;
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: 0 2px 8px rgba(255, 68, 68, 0.3);
+    animation: shake 0.5s ease-in-out;
+  `;
+  
+  // Add shake animation
+  const style = document.createElement('style');
+  style.textContent = `
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-5px); }
+      75% { transform: translateX(5px); }
+    }
+  `;
+  document.head.appendChild(style);
+  
+  chatMessages.appendChild(warning);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+  
+  // Auto remove after 5 seconds
+  setTimeout(() => {
+    if (warning.parentElement) {
+      warning.style.animation = 'fadeOut 0.3s ease-out';
+      setTimeout(() => warning.remove(), 300);
+    }
+  }, 5000);
+}
+
+// Update send message to use Socket.IO with content moderation
 sendMessage.onclick = () => {
   const message = chatInput.value.trim();
-  if (message) {
-    addChatMessage('Bạn', message);
-    chatInput.value = '';
+  if (!message) return;
+  
+  // Content moderation check
+  if (isToxicMessage(message)) {
+    showModerationWarning('Tin nhắn chứa từ ngữ không chuẩn mực. Vui lòng sử dụng ngôn từ phù hợp trong môi trường meeting.');
     
-    // Send via Socket.IO
-    if (socket && socket.connected) {
-      console.log('Sending chat message:', message);
-      socket.emit('chat-message', {
-        roomCode,
-        message,
-        sender: userEmail
-      });
-    } else {
-      console.error('Socket not connected!');
-    }
+    // Add red border to input as visual feedback
+    chatInput.style.border = '2px solid #ff4444';
+    chatInput.style.animation = 'shake 0.5s ease-in-out';
+    
+    // Reset border after animation
+    setTimeout(() => {
+      chatInput.style.border = '2px solid transparent';
+      chatInput.style.animation = '';
+    }, 500);
+    
+    return; // Don't send the message
+  }
+  
+  // Message is clean, proceed to send
+  addChatMessage('Bạn', message);
+  chatInput.value = '';
+  
+  // Send via Socket.IO
+  if (socket && socket.connected) {
+    console.log('Sending chat message:', message);
+    socket.emit('chat-message', {
+      roomCode,
+      message,
+      sender: userEmail
+    });
+  } else {
+    console.error('Socket not connected!');
   }
 };
 
@@ -1305,24 +1434,41 @@ closePrivateChat.onclick = () => {
 
 function sendPrivateChatMessage() {
   const message = privateChatInput.value.trim();
-  if (message && currentPrivateChatUser) {
-    console.log('📤 Sending private message to:', currentPrivateChatUser);
+  if (!message || !currentPrivateChatUser) return;
+  
+  // Content moderation check for private chat
+  if (isToxicMessage(message)) {
+    showModerationWarning('Tin nhắn riêng chứa từ ngữ không chuẩn mực. Vui lòng sử dụng ngôn từ phù hợp.');
     
-    // Add to UI and save
-    addPrivateChatMessage('Bạn', message, true, true);
-    privateChatInput.value = '';
+    // Add red border to private chat input
+    privateChatInput.style.border = '2px solid #ff4444';
+    privateChatInput.style.animation = 'shake 0.5s ease-in-out';
     
-    // Send via Socket.IO
-    if (socket && socket.connected) {
-      socket.emit('private-message', {
-        to: currentPrivateChatUser.id,
-        message,
-        sender: userEmail
-      });
-      console.log('✅ Private message sent');
-    } else {
-      console.error('❌ Socket not connected');
-    }
+    // Reset border after animation
+    setTimeout(() => {
+      privateChatInput.style.border = '2px solid transparent';
+      privateChatInput.style.animation = '';
+    }, 500);
+    
+    return; // Don't send the message
+  }
+  
+  console.log('📤 Sending private message to:', currentPrivateChatUser);
+  
+  // Add to UI and save
+  addPrivateChatMessage('Bạn', message, true, true);
+  privateChatInput.value = '';
+  
+  // Send via Socket.IO
+  if (socket && socket.connected) {
+    socket.emit('private-message', {
+      to: currentPrivateChatUser.id,
+      message,
+      sender: userEmail
+    });
+    console.log('✅ Private message sent');
+  } else {
+    console.error('❌ Socket not connected');
   }
 }
 

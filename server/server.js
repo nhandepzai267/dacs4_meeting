@@ -135,13 +135,67 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Chat message
+  // Content Moderation - Server-side validation
+  const toxicWords = [
+    // Vietnamese toxic words
+    'ngu', 'đồ ngu', 'ngu ngốc', 'khốn nạn', 'khốn', 'đần', 'ngốc',
+    'chết tiệt', 'đồ khốn', 'thằng ngu', 'con ngu', 'đồ ngốc',
+    'ngu si', 'đần độn', 'khốn kiếp', 'đồ đần',
+    
+    // English toxic words
+    'stupid', 'idiot', 'fool', 'dumb', 'moron', 'hate', 'damn',
+    
+    // Leetspeak variations
+    'n9u', 'ng0c', 'kh0n', 'd4n'
+  ];
+
+  const toxicPatterns = [
+    /\bn[u3]g[u0]\b/gi,           // ngu, n3g0, nugu, n3gu
+    /\bkh[o0]n\b/gi,              // khon, kh0n
+    /\bd[a4]n\b/gi,               // dan, d4n
+    /\bng[o0]c\b/gi,              // ngoc, ng0c
+    /\bst[u3]p[i1]d\b/gi,         // stupid, st3p1d
+    /\b[i1]d[i1][o0]t\b/gi        // idiot, 1d10t
+  ];
+
+  function isToxicMessage(message) {
+    const lowerMessage = message.toLowerCase();
+    
+    // Check exact word matches
+    const hasExactMatch = toxicWords.some(word => lowerMessage.includes(word));
+    if (hasExactMatch) return true;
+    
+    // Check pattern matches
+    const hasPatternMatch = toxicPatterns.some(pattern => pattern.test(message));
+    return hasPatternMatch;
+  }
+
+  // Chat message with content moderation
   socket.on('chat-message', ({ roomCode, message, sender }) => {
+    // Server-side content moderation
+    if (isToxicMessage(message)) {
+      console.log(`🚫 Toxic message blocked from ${sender}: "${message}"`);
+      
+      // Send warning back to sender only
+      socket.emit('moderation-warning', {
+        message: 'Tin nhắn của bạn chứa từ ngữ không phù hợp và đã bị chặn. Vui lòng sử dụng ngôn từ lịch sự trong meeting.',
+        timestamp: new Date().toISOString()
+      });
+      
+      // Log for moderation purposes
+      console.log(`📊 Moderation stats - Room: ${roomCode}, User: ${sender}, Time: ${new Date().toISOString()}`);
+      
+      return; // Don't broadcast the toxic message
+    }
+
+    // Message is clean, broadcast to room
     io.to(roomCode).emit('chat-message', {
       message,
       sender,
       timestamp: new Date().toISOString()
     });
+    
+    console.log(`💬 Clean message sent in room ${roomCode} by ${sender}`);
   });
 
   // Media status change (mic/cam on/off)
@@ -171,19 +225,35 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Private message
+  // Private message with content moderation
   socket.on('private-message', ({ to, message, sender }) => {
     console.log(`Private message from ${socket.id} (${sender}) to ${to}`);
     console.log(`   Message: "${message}"`);
     
-    // Send to specific socket
+    // Server-side content moderation for private messages
+    if (isToxicMessage(message)) {
+      console.log(`🚫 Toxic private message blocked from ${sender}: "${message}"`);
+      
+      // Send warning back to sender only
+      socket.emit('moderation-warning', {
+        message: 'Tin nhắn riêng của bạn chứa từ ngữ không phù hợp và đã bị chặn. Vui lòng sử dụng ngôn từ lịch sự trong meeting.',
+        timestamp: new Date().toISOString()
+      });
+      
+      // Log for moderation purposes
+      console.log(`📊 Private message moderation - From: ${sender}, To: ${to}, Time: ${new Date().toISOString()}`);
+      
+      return; // Don't send the toxic private message
+    }
+    
+    // Message is clean, send to specific socket
     io.to(to).emit('private-message', {
       from: socket.id,
       message,
       sender
     });
     
-    console.log(`Private message sent to ${to}`);
+    console.log(`💬 Clean private message sent from ${sender} to ${to}`);
   });
 
   // File message
